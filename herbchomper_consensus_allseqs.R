@@ -10,7 +10,7 @@
 
 ### Usage: Rscript herbchomper_consensus_allseqs.R -a [alignment in] -o [alignment out] -w [size of sliding window] -i [identity cutoff] -g [gap size necessary to restart trimming]
 
-#get args
+## get arguments
 args = commandArgs(trailingOnly=TRUE)
 #alignment in
 seqfile<-args[which(args=="-a")+1]
@@ -23,6 +23,7 @@ identity<-as.numeric(args[which(args=="-i")+1])
 #size of gap required to restart trimming
 gapsize<-as.numeric(args[which(args=="-g")+1])
 
+## Optional arguments ##
 #after chomping, sequences with less than than this many non-gap sites will be removed
 if(any(grepl("-m",args) | grepl("--min_n_sites_per_seq",args))){
   args[which(args=="--min_n_sites_per_seq")]<-"-m"
@@ -38,6 +39,24 @@ if(any(grepl("-p",args) | grepl("--min_prop_seqs_per_site",args))){
 }else{
   MPPS<-0.05
 }
+
+## Options for consensus-making
+if("--consensus_prop_gaps_allowed" %in% args){
+  consensus_prop_gaps_allowed<-as.numeric(args[which(args=="--consensus_prop_gaps_allowed")+1])
+}else{
+  consensus_prop_gaps_allowed<-0.9
+}
+
+if("--consensus_minor_prop_ignore" %in% args){
+  consensus_minor_prop_ignore<-as.numeric(args[which(args=="--consensus_minor_prop_ignore")+1])
+  if (consensus_minor_prop_ignore>0.5) stop("Consensus_minor_prop_ignore must be between 0 and 0.5!")
+  }else{
+  consensus_minor_prop_ignore<-0.2
+}
+
+
+
+## Done parsing arguments ##
 
 ###### To use in the R environment, uncomment this section, set these five variables and then run from here down
 ##working directory
@@ -64,7 +83,7 @@ g<-gapsize-1
 
 fa_as_aln<-function(x) {as.alignment(length(x),names(x),lapply(x,c2s),NA)}
 
-consensus_ignoreGaps<-function(aln,prop_gaps_allowed=0.9,conflict_minor_prop_ignore=0.05){
+consensus_ignoreGaps<-function(aln,prop_gaps_allowed,conflict_minor_prop_ignore){
   temp<-seqinr::consensus(aln,method="profile")
   rnames<-rownames(temp)
   gaprow<-which(rnames=="-")
@@ -80,7 +99,7 @@ consensus_ignoreGaps<-function(aln,prop_gaps_allowed=0.9,conflict_minor_prop_ign
   conflict_ratio<-apply(temp_nonGap,2,function(x)min(x[x!=0])[1]/sum(x[x!=0]))
   passes_conflict_ratio<- (conflict_ratio <= conflict_minor_prop_ignore) 
   ## 3. Get index of sites with < "prop_gaps_allowed" proportion gaps
-  prop_gaps<-apply(temp,2,function(x)(x[gaprow]+x[ngaprow])/sum(x))
+  prop_gaps<-apply(temp,2,function(x) (x[gaprow]+x[ngaprow])/aln$nb )
   passes_prop_gaps<-prop_gaps <= prop_gaps_allowed
   cat("Generating majority-rule consensus sequence while requiring:\n\ta). % of sequences with data:\t\t\t>",
       100*(1-prop_gaps_allowed),"%\n\tAND\n\tb). If ambiguous, % conflicting sequences:\t<",
@@ -99,7 +118,18 @@ consensus_ignoreGaps<-function(aln,prop_gaps_allowed=0.9,conflict_minor_prop_ign
   majority_ignoreGaps
 }
 
-geneAlCon<-consensus_ignoreGaps(read.alignment(seqfile,format ="fasta"))
+geneAlCon<-consensus_ignoreGaps(read.alignment(seqfile,format ="fasta"),
+                                prop_gaps_allowed=consensus_prop_gaps_allowed,
+                                conflict_minor_prop_ignore=consensus_minor_prop_ignore)
+if("--write_consensus" %in% args){
+  write.fasta(geneAlCon,
+              names = paste0("HerbComper_consensus_gaps_",consensus_prop_gaps_allowed,
+                             "_minor_conflict_",consensus_minor_prop_ignore),
+              file.out = paste0(outfile,
+                                ".consensus.gaps_",consensus_prop_gaps_allowed,
+                                ".minor_conflict_",consensus_minor_prop_ignore,
+                                ".fasta"))
+}
 
 cat("Input file:",seqfile,"\n")
 
