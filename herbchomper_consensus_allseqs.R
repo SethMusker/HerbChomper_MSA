@@ -54,7 +54,8 @@ if("--consensus_minor_prop_ignore" %in% args){
   consensus_minor_prop_ignore<-0.2
 }
 
-
+cat("Input file:",seqfile,"\n")
+cat("OUtput file:",outfile,"\n")
 
 ## Done parsing arguments ##
 
@@ -75,8 +76,49 @@ if("--consensus_minor_prop_ignore" %in% args){
 if ("seqinr" %in% rownames(installed.packages()) == FALSE) {install.packages("seqinr")}
 library(seqinr)
 gene<-read.fasta(paste(seqfile))
-w<-slidingwindow-1
-g<-gapsize-1
+
+countNonGaps<-function(x) sum(!x %in% c("-","N","n"))
+exceedsNumNonGap<-function(x,num_nonGap) countNonGaps(x)>num_nonGap
+exceedsPropNonGap<-function(x,prop_nonGap) (countNonGaps(x)/length(x))>prop_nonGap
+getFastaWidth<-function(fa) unique(unlist(lapply(fa,length)))
+
+trimFasta<-function(fa,min_n_sites_per_seq=10,min_prop_seqs_per_site=0.05){
+  # iteratively trims until there are
+  ## 1. no empty sequences AND
+  ## 2. no effectively empty sites (i.e., less than 3 sequences with data at the site)
+  fa_width<-getFastaWidth(fa)
+  condition <- TRUE
+  iter<-0
+  while(condition==TRUE){
+    iter<-iter+1
+    cat("Trimming iteration\t",iter,"\n")
+    # Find gappy sequences
+    is_empty_seq<-!unlist(lapply(fa,exceedsNumNonGap,num_nonGap=min_n_sites_per_seq))
+    if(any(is_empty_seq)){
+      cat(sum(is_empty_seq),"out of",length(fa),"SEQUENCES have <",min_n_sites_per_seq,"sites with data (not N, not gap). Removing them.\n")
+      cat("Sequences removed:",names(fa)[is_empty_seq],sep = "\n")
+      fa<-fa[!is_empty_seq] 
+    } else{
+      cat("No empty sequences found in this iteration.\n")
+    }
+    # Find gappy sites
+    # is_effectively_empty_site<-!apply(do.call(rbind,fa),2,exceedsNumNonGap,num_nonGap=2)
+    is_effectively_empty_site<-!apply(do.call(rbind,fa),2,exceedsPropNonGap,prop_nonGap=min_prop_seqs_per_site)
+    if(any(is_effectively_empty_site)){
+      cat(sum(is_effectively_empty_site),"out of",fa_width,"SITES have <",min_prop_seqs_per_site*100,"% sequences with data (not N, not gap). Removing them.\n")
+      fa<-lapply(fa,function(x)x[-which(is_effectively_empty_site)]) 
+    } else{
+      cat("No missing sites! Done trimming.\n")
+      condition <- FALSE
+    }
+  }
+  fa
+}
+
+##
+cat("Performing initial fasta filtering to remove sequences with <",MNPS,"non-gap/non-N sites.\n")
+
+gene<-trimFasta(gene,min_n_sites_per_seq=MNPS,min_prop_seqs_per_site=0)
 
 
 ## smarter consensus
@@ -108,17 +150,17 @@ consensus_ignoreGaps<-function(aln,prop_gaps_allowed,conflict_minor_prop_ignore)
   ## change sites not passing above filters to gaps
   majority_ignoreGaps[!(passes_prop_gaps)] <-"-"
   ngap2<-sum(majority_ignoreGaps=="-")
-  cat("Results:\n\ta). Characters in the consensus recoded as gaps:\t",ngap2-ngap,"\n")
+  cat("Results:\n\ta). Characters in the consensus recoded as gaps by missingness:\t",ngap2-ngap,"\n")
   majority_ignoreGaps[!(passes_conflict_ratio) & !(is_monomorphic)]<-"-"
   ngap3<-sum(majority_ignoreGaps=="-")
-  cat("\tAND\n\tb). Characters in the consensus recoded as gaps:\t",ngap3-ngap2,"\n")
+  cat("\tAND\n\tb). Characters in the consensus recoded as gaps by ambiguity:\t",ngap3-ngap2,"\n")
   cat("\nFinal consensus has ",length(majority_ignoreGaps)-ngap3,
       " non-gaps out of a total of ",length(majority_ignoreGaps)," sites (",
       signif(ngap3*100/length(majority_ignoreGaps),2),"% gaps).\n",sep="")
   majority_ignoreGaps
 }
 
-geneAlCon<-consensus_ignoreGaps(read.alignment(seqfile,format ="fasta"),
+geneAlCon<-consensus_ignoreGaps(fa_as_aln(gene),
                                 prop_gaps_allowed=consensus_prop_gaps_allowed,
                                 conflict_minor_prop_ignore=consensus_minor_prop_ignore)
 if("--write_consensus" %in% args){
@@ -131,7 +173,10 @@ if("--write_consensus" %in% args){
                                 ".fasta"))
 }
 
-cat("Input file:",seqfile,"\n")
+## begin Chomping
+cat("\n**************************\nBegin chomping.\n")
+w<-slidingwindow-1
+g<-gapsize-1
 
 for(target in 1:length(gene)){
   #count the number of non-gap characters in the target sequence:
@@ -243,44 +288,8 @@ for(target in 1:length(gene)){
 cat("\n**************************\n
     Chomping finished! Next step is to remove any now-empty sequences and now-empty sites.\n")
 
-countNonGaps<-function(x) sum(!x %in% c("-","N","n"))
-exceedsNumNonGap<-function(x,num_nonGap) countNonGaps(x)>num_nonGap
-exceedsPropNonGap<-function(x,prop_nonGap) (countNonGaps(x)/length(x))>prop_nonGap
-getFastaWidth<-function(fa) unique(unlist(lapply(fa,length)))
-
-trimFasta<-function(fa,min_n_sites_per_seq=10,min_prop_seqs_per_site=0.05){
-  # iteratively trims until there are
-  ## 1. no empty sequences AND
-  ## 2. no effectively empty sites (i.e., less than 3 sequences with data at the site)
-  fa_width<-getFastaWidth(fa)
-  condition <- TRUE
-  iter<-0
-  while(condition==TRUE){
-    iter<-iter+1
-    cat("Trimming iteration\t",iter,"\n")
-    # Find gappy sequences
-    is_empty_seq<-!unlist(lapply(fa,exceedsNumNonGap,num_nonGap=min_n_sites_per_seq))
-    if(any(is_empty_seq)){
-      cat(sum(is_empty_seq),"out of",length(fa),"SEQUENCES have <",min_n_sites_per_seq,"sites with data (not N, not gap). Removing them.\n")
-      cat("Sequences removed:",names(fa)[is_empty_seq],sep = "\n")
-      fa<-fa[!is_empty_seq] 
-    } else{
-      cat("No empty sequences found in this iteration.\n")
-    }
-    # Find gappy sites
-    # is_effectively_empty_site<-!apply(do.call(rbind,fa),2,exceedsNumNonGap,num_nonGap=2)
-    is_effectively_empty_site<-!apply(do.call(rbind,fa),2,exceedsPropNonGap,prop_nonGap=min_prop_seqs_per_site)
-    if(any(is_effectively_empty_site)){
-      cat(sum(is_effectively_empty_site),"out of",fa_width,"SITES have <",min_prop_seqs_per_site*100,"% sequences with data (not N, not gap). Removing them.\n")
-      fa<-lapply(fa,function(x)x[-which(is_effectively_empty_site)]) 
-    } else{
-      cat("No missing sites! Done trimming.\n")
-      condition <- FALSE
-    }
-  }
-  fa
-}
-
 gene<-trimFasta(gene,min_n_sites_per_seq=MNPS,min_prop_seqs_per_site=MPPS)
+
+cat("Output fasta",outfile,"has",getFastaWidth(gene),"SITES.\n")
 
 write.fasta(lapply(gene,toupper),names=names(gene),file=outfile)
