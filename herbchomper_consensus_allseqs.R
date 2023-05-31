@@ -10,11 +10,32 @@
 
 ### Usage: Rscript herbchomper_consensus_allseqs.R -a [alignment in] -o [alignment out] -w [size of sliding window] -i [identity cutoff] -g [gap size necessary to restart trimming]
 usage<-"Rscript herbchomper_consensus_allseqs.R -a [alignment in] -o [alignment out] -w [size of sliding window] -i [identity cutoff] -g [gap size necessary to restart trimming]"
+help_usage <- "
+REQUIRED:
+-a [alignment in (fasta)] 
+-o [alignment out (fasta; excludes extension)] 
+-w [size of sliding window in bp. Don't make this too low. Try 50.] 
+-i [identity cutoff below which windows are recoded as gaps. Don't make this too high. Try 0.8.] 
+-g [gap size necessary to restart trimming; gaps below this size that are encountered while scanning right or left will cause chomping to terminate. Use herbchompernogaps_consensus_allseqs.R if you want to avoid this.]
+
+OPTIONAL:
+-c [default=1] [wide (1) or narrow (0) cut (for recoding windows to gaps)]
+
+ Global fasta trimming options:
+--min_n_sites_per_seq [default=100] [Before and after chomping, *sequences* with <= 'min_n_sites_per_seq' non-gap sites will be removed. If < 1 this is interpreted as a proportion.]
+--min_prop_seqs_per_site [default=0.1] [Before and after chomping, *sites* <= 'min_prop_seqs_per_site' non-gap sites (proportion) will be removed]
+ 
+ Consensus-building options:
+--consensus_prop_gaps_allowed [default=0.9] [Sites with > 'consensus_prop_gaps_allowed' will be coded as missing in the consensus]
+--consensus_minor_prop_ignore [default = 0.2] [Polymorphic sites with > 'consensus_minor_prop_ignore' minor allele frequency will be recoded as gaps in the consensus. Must be between 0 and 0.5]
+"
 ## get arguments
 args = commandArgs(trailingOnly=TRUE)
-if("-h" %in% args | "--help" %in% args | length(args)==0) {
-	cat("USAGE: \n-------\n",usage,"\n")
-}else{
+if ("-h" %in% args | "--help" %in% args | length(args) == 0) {
+	cat("ARGUMENTS: \n-------",help_usage,"\n")
+	cat("USAGE (minimal): \n-------\n",usage,"\n")
+	q()
+}
 #alignment in
 	seqfile<-args[which(args=="-a")+1]
 	#output alignment
@@ -85,41 +106,45 @@ if("-h" %in% args | "--help" %in% args | length(args)==0) {
 	exceedsPropNonGap<-function(x,prop_nonGap) (countNonGaps(x)/length(x))>prop_nonGap
 	getFastaWidth<-function(fa) unique(unlist(lapply(fa,length)))
 
-	trimFasta<-function(fa,min_n_sites_per_seq=10,min_prop_seqs_per_site=0.05){
-	  # iteratively trims until there are
-	  ## 1. no empty sequences AND
-	  ## 2. no effectively empty sites (i.e., less than 3 sequences with data at the site)
-	  fa_width<-getFastaWidth(fa)
-	  condition <- TRUE
-	  iter<-0
-	  while(condition==TRUE){
-		iter<-iter+1
-		cat("Trimming iteration\t",iter,"\n")
-		# Find gappy sequences
-		if(min_n_sites_per_seq>1){
-			is_empty_seq<-!unlist(lapply(fa,exceedsNumNonGap,num_nonGap=min_n_sites_per_seq))
-		}else{
-			is_empty_seq<-!unlist(lapply(fa,exceedsPropNonGap,prop_nonGap=min_n_sites_per_seq))
+	trimFasta <- function(fa,min_n_sites_per_seq=10,min_prop_seqs_per_site=0.05) {
+	# iteratively trims until there are
+	## 1. no empty sequences AND
+	## 2. no effectively empty sites
+	fa_width <- getFastaWidth(fa)
+	condition <- TRUE
+	iter <- 0
+	while (condition == TRUE) {
+	iter <- iter+1
+	cat("Trimming iteration\t",iter,"\n")
+		# Find and remove gappy sites
+		is_empty_site <- !apply(do.call(rbind,fa),2,meetsPropNonGap,prop_nonGap=min_prop_seqs_per_site)
+		if (any(is_empty_site)) {
+			cat(sum(is_empty_site),"out of",fa_width,"SITES have <",min_prop_seqs_per_site*100,"% sequences with data (not N, not gap). Removing them.\n")
+			fa <- lapply(fa,function(x) x[-which(is_empty_site)])
+			found_missing_sites<-TRUE
+		} else {
+			cat("No missing sites! Done trimming.\n")
+			found_missing_sites<-FALSE
 		}
-		if(any(is_empty_seq)){
-		  cat(sum(is_empty_seq),"out of",length(fa),"SEQUENCES have <",min_n_sites_per_seq,"sites with data (not N, not gap). Removing them.\n")
-		  cat("Sequences removed:",names(fa)[is_empty_seq],sep = "\n")
-		  fa<-fa[!is_empty_seq] 
-		} else{
-		  cat("No empty sequences found in this iteration.\n")
+		# Find and remove gappy sequences
+		if (min_n_sites_per_seq>1) {
+			is_empty_seq <- !unlist(lapply(fa,meetsNumNonGap,num_nonGap=min_n_sites_per_seq))
+		} else {
+			is_empty_seq <- !unlist(lapply(fa,meetsPropNonGap,prop_nonGap=min_n_sites_per_seq))
 		}
-		# Find gappy sites
-		is_effectively_empty_site<-!apply(do.call(rbind,fa),2,exceedsPropNonGap,prop_nonGap=min_prop_seqs_per_site)
-		if(any(is_effectively_empty_site)){
-		  cat(sum(is_effectively_empty_site),"out of",fa_width,"SITES have <",min_prop_seqs_per_site*100,"% sequences with data (not N, not gap). Removing them.\n")
-		  fa<-lapply(fa,function(x)x[ -which(is_effectively_empty_site) ]) 
-		} else{
-		  cat("No missing sites! Done trimming.\n")
-		  condition <- FALSE
+		if (any(is_empty_seq)) {
+			cat(sum(is_empty_seq),"out of",length(fa),"SEQUENCES have <",min_n_sites_per_seq,"sites with data (not N, not gap). Removing them.\n")
+			cat("Sequences removed:",names(fa)[is_empty_seq],sep = "\n")
+			found_missing_seqs<-TRUE
+			fa <- fa[!is_empty_seq]
+		} else {
+			cat("No empty sequences found in this iteration.\n")
+			found_missing_seqs<-FALSE
 		}
-	  }
-	  fa
+		if (!found_missing_sites && !found_missing_seqs) condition <- FALSE
 	}
+	return(fa)
+	}	
 
 	##
 	cat("Performing initial fasta filtering to remove sequences with <",MNPS,"non-gap/non-N sites.\n")
@@ -285,4 +310,3 @@ if("-h" %in% args | "--help" %in% args | length(args)==0) {
 	cat("Output fasta",outfile,"has",getFastaWidth(gene),"SITES.\n")
 
 	write.fasta(lapply(gene,toupper),names=names(gene),file=outfile)
-}
