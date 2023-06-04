@@ -172,7 +172,6 @@ consensus_ignoreGaps <- function(aln,prop_gaps_allowed,conflict_minor_prop_ignor
 		## 2. Find SNPs (to recode as gaps eventually)
 		#print(temp_nonGap)
 		is_monomorphic <- apply(temp_nonGap,2,function(x) length(x[which(x!=0)]) == 1)
-		print(is_monomorphic)
 		conflict_ratio <- apply(temp_nonGap,2,function(x) min(x[x!=0])[1] / sum(x[x!=0]))
 		passes_conflict_ratio <-  (conflict_ratio <= conflict_minor_prop_ignore)
 		## 3. Get index of sites with < "prop_gaps_allowed" proportion gaps
