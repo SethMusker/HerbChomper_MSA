@@ -157,36 +157,45 @@ fa_as_aln <- function(x) as.alignment(length(x),names(x),lapply(x,c2s),NA)
 
 consensus_ignoreGaps <- function(aln,prop_gaps_allowed,conflict_minor_prop_ignore) {
 	temp <- seqinr::consensus(aln,method="profile") # produces a matrix of character counts per site
+	#print(temp)
 	rnames <- rownames(temp)
-	gaprow <- which(rnames == "-")
-	ngaprow <- which(rnames == "n")
-	temp_nonGap <- temp[-c(gaprow,ngaprow),]
-	rnames_nonGap <- rownames(temp_nonGap)
-	## 1. Get the majority sequence, ignoring gaps
-	##    note that for now ties are resolved arbitrarily, but later will be recoded as gaps
-	##    due to the minor proportion ratio (which is bounded at [0,0.5])
-	majority_ignoreGaps <- unlist(apply(temp_nonGap,2,function(x) rnames_nonGap[which(x == max(x))][1]))
-	## 2. Find SNPs (to recode as gaps eventually)
-	is_monomorphic <- apply(temp_nonGap,2,function(x) length(x[which(x!=0)]) == 1)
-	conflict_ratio <- apply(temp_nonGap,2,function(x) min(x[x!=0])[1] / sum(x[x!=0]))
-	passes_conflict_ratio <-  (conflict_ratio <= conflict_minor_prop_ignore)
-	## 3. Get index of sites with < "prop_gaps_allowed" proportion gaps
-	prop_gaps <- apply(temp,2,function(x) (x[gaprow]+x[ngaprow]) / aln$nb)
-	passes_prop_gaps <- prop_gaps <= prop_gaps_allowed
-	cat("Generating majority-rule consensus sequence while requiring:\n\t(a). % of sequences with data:\t\t\t>",
-		100*(1-prop_gaps_allowed),"%\n\tAND\n\t(b). If ambiguous, % conflicting sequences:\t<",
-		conflict_minor_prop_ignore*100,"%\n")
-	ngap <- sum(majority_ignoreGaps == "-")
-	## change sites not passing above filters to gaps
-	majority_ignoreGaps[!(passes_prop_gaps)]  <- "-"
-	ngap2 <- sum(majority_ignoreGaps == "-")
-	cat("Results:\n\t(a). Characters in the consensus recoded as gaps by missingness:\t",ngap2-ngap,"\n")
-	majority_ignoreGaps[!(passes_conflict_ratio) & !(is_monomorphic)] <- "-"
-	ngap3 <- sum(majority_ignoreGaps == "-")
-	cat("\tAND\n\t(b). Characters in the consensus recoded as gaps by ambiguity:\t",ngap3-ngap2,"\n")
-	cat("\nFinal consensus has ",length(majority_ignoreGaps)-ngap3,
-		" non-gaps out of a total of ",length(majority_ignoreGaps)," sites (",
-		signif(ngap3*100/length(majority_ignoreGaps),2),"% gaps).\n",sep="")
+
+	if ("-" %in% rnames | "n" %in% rnames){
+		gaprow <- which(rnames == "-")
+		ngaprow <- which(rnames == "n")
+		temp_nonGap <- temp[-sort(gaprow,ngaprow),]
+		rnames_nonGap <- rownames(temp_nonGap)
+		## 1. Get the majority sequence, ignoring gaps
+		##    note that for now ties are resolved arbitrarily, but later will be recoded as gaps
+		##    due to the minor proportion ratio (which is bounded at [0,0.5])
+		majority_ignoreGaps <- unlist(apply(temp_nonGap,2,function(x) rnames_nonGap[which(x == max(x))][1]))
+		## 2. Find SNPs (to recode as gaps eventually)
+		#print(temp_nonGap)
+		is_monomorphic <- apply(temp_nonGap,2,function(x) length(x[which(x!=0)]) == 1)
+		print(is_monomorphic)
+		conflict_ratio <- apply(temp_nonGap,2,function(x) min(x[x!=0])[1] / sum(x[x!=0]))
+		passes_conflict_ratio <-  (conflict_ratio <= conflict_minor_prop_ignore)
+		## 3. Get index of sites with < "prop_gaps_allowed" proportion gaps
+		prop_gaps <- apply(temp,2,function(x) (x[gaprow]+x[ngaprow]) / aln$nb)
+		passes_prop_gaps <- prop_gaps <= prop_gaps_allowed
+		cat("Generating majority-rule consensus sequence while requiring:\n\t(a). % of sequences with data:\t\t\t>",
+			100*(1-prop_gaps_allowed),"%\n\tAND\n\t(b). If ambiguous, % conflicting sequences:\t<",
+			conflict_minor_prop_ignore*100,"%\n")
+		ngap <- sum(majority_ignoreGaps == "-")
+		## change sites not passing above filters to gaps
+		majority_ignoreGaps[!(passes_prop_gaps)]  <- "-"
+		ngap2 <- sum(majority_ignoreGaps == "-")
+		cat("Results:\n\t(a). Characters in the consensus recoded as gaps by missingness:\t",ngap2-ngap,"\n")
+		majority_ignoreGaps[!(passes_conflict_ratio) & !(is_monomorphic)] <- "-"
+		ngap3 <- sum(majority_ignoreGaps == "-")
+		cat("\tAND\n\t(b). Characters in the consensus recoded as gaps by ambiguity:\t",ngap3-ngap2,"\n")
+		cat("\nFinal consensus has ",length(majority_ignoreGaps)-ngap3,
+			" non-gaps out of a total of ",length(majority_ignoreGaps)," sites (",
+			signif(ngap3*100/length(majority_ignoreGaps),2),"% gaps).\n",sep="")
+	} else {
+		cat("No gaps or Ns found!\n")
+		majority_ignoreGaps <- unlist(apply(temp,2,function(x) rnames[which(x == max(x))][1]))
+	}
 	return(majority_ignoreGaps)
 }
 
