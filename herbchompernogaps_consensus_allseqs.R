@@ -163,7 +163,7 @@ consensus_ignoreGaps <- function(aln,prop_gaps_allowed,conflict_minor_prop_ignor
 	if ("-" %in% rnames | "n" %in% rnames){
 		gaprow <- which(rnames == "-")
 		ngaprow <- which(rnames == "n")
-		temp_nonGap <- temp[-sort(gaprow,ngaprow),]
+		temp_nonGap <- temp[-c(gaprow,ngaprow),]
 		rnames_nonGap <- rownames(temp_nonGap)
 		## 1. Get the majority sequence, ignoring gaps
 		##    note that for now ties are resolved arbitrarily, but later will be recoded as gaps
