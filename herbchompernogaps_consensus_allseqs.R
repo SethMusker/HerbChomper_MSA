@@ -97,7 +97,7 @@ if (any(args %in% c("-p","--min_seqs_per_site"))) {
 if (any(args %in% c("-r","--replacement_char"))) {
   if(any(args=="--replacement_char")) {
     args[which(args == "--replacement_char")] <- "-r" }
-  replacement_char <- args[which(args == "-r")+1]
+  replacement_char <- as.character(args[which(args == "-r")+1])
 } else {
   replacement_char <- "-"
 }
@@ -290,8 +290,9 @@ w <- slidingwindow-1
 
 for (target in 1:length(gene)) {
 	#count the number of non-gap characters in the target sequence:
-	length1 <- sum(gene[[target]][1:length(gene[[target]])]!="-")
-	#find where to start - forward
+  # length1 <- sum(gene[[target]][1:length(gene[[target]])]!="-")
+  length1 <- sum( ! gene[[target]][1:length(gene[[target]])] %in% c("-","n"))
+  #find where to start - forward
 	posF <- min(which(!gene[[target]] %in% c("-","n")))
 	#find where to start - reverse
 	posR <- max(which(!gene[[target]] %in% c("-","n")))
@@ -354,8 +355,9 @@ for (target in 1:length(gene)) {
 		gene[[target]][intersect(cutF,cutR)] <- replacement_char
 	}
 	## HERE ends the herbchompernogaps code  ----
-		length2 <- sum(gene[[target]][1:length(gene[[target]])] != replacement_char)
-		cat(paste(length1-length2,
+	# length2 <- sum(gene[[target]][1:length(gene[[target]])] != replacement_char)
+	length2 <- sum( ! gene[[target]][1:length(gene[[target]])] %in% c("-","n",replacement_char))
+	cat(paste(length1-length2,
 		          " non-gap characters out of ",
 		          length1,
 		          " removed for sequence ",
