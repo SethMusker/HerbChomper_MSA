@@ -2,11 +2,11 @@
 
 ## Modified by S. Musker 
 ## Aug 31, 2022 (v1)
-## Dec 2022, (v2): Modified for better consensus-making and post-chomp filtering 
-## Rather than specifying a reference and target sequence, the script calculates the majority rule consensus for the reference,
-## and uses that to decide whether to chomp a bit of sequence.
-## It does this for all sequences.
-## alignments must be in fasta format
+## - Dec 2022, (v2): Modified for better consensus-making and post-chomp filtering
+## - Rather than specifying a reference and target sequence, the script calculates
+##   the majority rule consensus for the reference, and uses that to decide
+##   whether to chomp a bit of sequence. It does this for all sequences.
+## - Alignments must be in fasta format
 
 usage <- "Rscript herbchompernogaps_consensus_allseqs.R -a [alignment in] -o [alignment out] -w [size of sliding window] -i [identity cutoff]"
 help_usage <- "
@@ -24,6 +24,7 @@ OPTIONAL:
 --trim_after [default=1] [Trim fasta after chomping? 1=yes, 0=no.]
 -m / --min_sites_per_seq [default=100] [Before AND after chomping, *sequences* with <= 'min_sites_per_seq' non-gap sites will be removed. If < 1 this is interpreted as a proportion.]
 -p / --min_seqs_per_site [default=0.1] [After chomping, *sites* <= 'min_seqs_per_site' non-gap sites (proportion) will be removed. If < 1 this is interpreted as a proportion.]
+-r / --replacement_char [default = '-'] [Which character to insert in place of sequences cut out. Default is gaps. Other reasonable options are '?' and 'N'.]
  
  Consensus-building options:
 --consensus_prop_gaps_allowed [default=0.9] [Sites with > 'consensus_prop_gaps_allowed' will be coded as missing in the consensus]
@@ -74,19 +75,31 @@ if ("--append_consensus" %in% args && (trim_after != 0)) {
 }
 
 #before and after chomping, sequences with less than than this many non-gap sites will be removed
-if (any(grepl("-m",args) | grepl("--min_sites_per_seq",args))) {
-	args[which(args == "--min_sites_per_seq")] <- "-m"
+if (any(args %in% c("-m","--min_sites_per_seq"))) {
+	if(any(args=="--min_sites_per_seq")) {
+	  args[which(args == "--min_sites_per_seq")] <- "-m" 
+	  }
 	MinSitesPerSeq <- as.numeric(args[which(args == "-m")+1])
 } else {
 	MinSitesPerSeq <- 100
 }
 
-# Sites with this many non-gap sites will be removed
-if (any(grepl("-p",args) | grepl("--min_seqs_per_site",args))) {
-	args[which(args == "--min_seqs_per_site")] <- "-p"
+# Sites with this many non-gap sequences will be removed
+if (any(args %in% c("-p","--min_seqs_per_site"))) {
+	if(any(args=="--min_seqs_per_site")) {
+	  args[which(args == "--min_seqs_per_site")] <- "-p" }
 	MinSeqsPerSite <- as.numeric(args[which(args == "-p")+1])
 } else {
 	MinSeqsPerSite <- 0.1
+}
+
+# Replacement character
+if (any(args %in% c("-r","--replacement_char"))) {
+  if(any(args=="--replacement_char")) {
+    args[which(args == "--replacement_char")] <- "-r" }
+  replacement_char <- args[which(args == "-r")+1]
+} else {
+  replacement_char <- "-"
 }
 
 ## Options for consensus-making
@@ -105,6 +118,8 @@ if ("--consensus_minor_prop_ignore" %in% args) {
 
 cat("Input file:",seqfile,"\n")
 cat("Output file:",outfile,"\n")
+cat("Replacement character for 'chomped' sites:",replacement_char,".\n")
+
 
 ## Done parsing arguments ##
 
@@ -125,6 +140,8 @@ cat("Output file:",outfile,"\n")
 # if ("seqinr" %in% rownames(installed.packages()) == FALSE) install.packages("seqinr")
 library(seqinr)
 gene <- read.fasta(paste(seqfile))
+cat("Replacing any missing sites coded as '?' with '-'.\n\n")
+gene<-lapply(gene, function(x)gsub("\\?","-",x))
 
 ## DEFINE functions ----
 countNonGaps <- function(x) sum(!x %in% c("-","N","n"))
@@ -183,26 +200,26 @@ trimFasta <- function(fa,min_sites_per_seq,min_seqs_per_site) {
 fa_as_aln <- function(x) as.alignment(length(x),names(x),lapply(x,c2s),NA)
 
 consensus_ignoreGaps <- function(aln,prop_gaps_allowed,conflict_minor_prop_ignore) {
-	temp <- seqinr::consensus(aln,method="profile") # produces a matrix of character counts per site
-	rnames <- rownames(temp)
+	consensus_profile <- seqinr::consensus(aln,method="profile") # produces a matrix of character counts per site
+	rnames <- rownames(consensus_profile)
 	gaprow <- which(rnames == "-")
 	ngaprow <- which(rnames == "n")
 	if ("-" %in% rnames || "n" %in% rnames) {
-	temp_nonGap <- temp[-c(gaprow,ngaprow),]
+	consensus_profile_nonGap <- consensus_profile[-c(gaprow,ngaprow),]
 	} else {
-	temp_nonGap <- temp
+	consensus_profile_nonGap <- consensus_profile
 	}
-	rnames_nonGap <- rownames(temp_nonGap)
+	rnames_nonGap <- rownames(consensus_profile_nonGap)
 	## 1. Get the majority sequence, ignoring gaps
 	##    note that for now ties are resolved arbitrarily, but later will be recoded as gaps
 	##    due to the minor proportion ratio (which is bounded at [0,0.5])
-	majority_ignoreGaps <- unlist(apply(temp_nonGap,2,function(x) rnames_nonGap[which(x == max(x))][1]))
+	majority_ignoreGaps <- unlist(apply(consensus_profile_nonGap,2,function(x) rnames_nonGap[which(x == max(x))][1]))
 	## 2. Find SNPs (to recode as gaps eventually)
-	is_monomorphic <- apply(temp_nonGap,2,function(x) length(x[which(x!=0)]) == 1)
-	conflict_ratio <- apply(temp_nonGap,2,function(x) min(x[x!=0])[1] / sum(x[x!=0]))
+	is_monomorphic <- apply(consensus_profile_nonGap,2,function(x) length(x[which(x!=0)]) == 1)
+	conflict_ratio <- apply(consensus_profile_nonGap,2,function(x) min(x[x!=0])[1] / sum(x[x!=0]))
 	passes_conflict_ratio <-  (conflict_ratio <= conflict_minor_prop_ignore)
 	## 3. Get index of sites with < "prop_gaps_allowed" proportion gaps
-	prop_gaps <- apply(temp,2,function(x) (x[gaprow]+x[ngaprow]) / aln$nb)
+	prop_gaps <- apply(consensus_profile,2,function(x) (x[gaprow]+x[ngaprow]) / aln$nb)
 	passes_prop_gaps <- prop_gaps <= prop_gaps_allowed
 	cat("Generating majority-rule consensus sequence while requiring:\n\t(a). % of sequences with data:\t\t\t>",
 		100*(1-prop_gaps_allowed),"%\n\tAND\n\t(b). If ambiguous, % conflicting sequences:\t<",
@@ -232,12 +249,14 @@ calcIdentity <- function(sequence, reference, start, window) {
 	s_is_r <- s == r
 	s_is_missing <- s %in% c("-","n")
 	r_is_missing <- r %in% c("-","n")
-	s_and_r_are_not_missing <- !s_is_missing & !r_is_missing
+	# s_and_r_are_not_missing <- !s_is_missing & !r_is_missing
+	s_and_r_are_not_missing <- !(s_is_missing | r_is_missing)
 	s_is_r_ignore_gap <- s_is_r & s_and_r_are_not_missing
 	sequence_identity <- sum(s_is_r_ignore_gap)/sum(s_and_r_are_not_missing)
 	if (is.na(sequence_identity)) sequence_identity <- 1 ## ignore empty windows. These will be trimmed by trimFasta()
 	return(sequence_identity)
 }
+
 
 ## Begin work! ----
 if (trim_before==1) {
@@ -316,8 +335,6 @@ for (target in 1:length(gene)) {
 			next
 		}
 	}
-	# print(cutR);Sys.sleep(2)
-
 
 	# cat("posF:",posF,"\n")
 	# cat("cutF:",cutF,"\n")
@@ -329,16 +346,22 @@ for (target in 1:length(gene)) {
 	if (cutsize == 1) {
 		## case when 0 sites trimmed
 		if (length(cutF)>1 && length(cutR)>1) {
-			gene[[target]][unique(c(cutF[2:length(cutF)],cutR[2:length(cutR)]))] <- "-"
+			gene[[target]][unique(c(cutF[2:length(cutF)],cutR[2:length(cutR)]))] <- replacement_char
 		} else {
-			gene[[target]][intersect(cutF,cutR)] <- "-"
+			gene[[target]][intersect(cutF,cutR)] <- replacement_char
 		}
 	} else {
-		gene[[target]][intersect(cutF,cutR)] <- "-"
+		gene[[target]][intersect(cutF,cutR)] <- replacement_char
 	}
 	## HERE ends the herbchompernogaps code  ----
-		length2 <- sum(gene[[target]][1:length(gene[[target]])]!="-")
-		cat(paste(length1-length2," non-gap characters out of ",length1," removed for sequence ",names(gene[target]),"\n",sep="",collapse=""))
+		length2 <- sum(gene[[target]][1:length(gene[[target]])] != replacement_char)
+		cat(paste(length1-length2,
+		          " non-gap characters out of ",
+		          length1,
+		          " removed for sequence ",
+		          names(gene[target]),
+		          "\n",sep="",collapse="")
+		    )
 }
 
 ## remove any now-empty sequences and now-empty sites
